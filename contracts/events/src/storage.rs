@@ -6,7 +6,8 @@ use soroban_sdk::String;
 
 use crate::errors::Error;
 use crate::types::{
-    CancellationState, DataKey, EventRecord, PendingAdmin, PendingUpgrade, Submission, Winner,
+    CancellationState, DataKey, EventRecord, PendingAdmin, PendingManager, PendingUpgrade,
+    Submission, Winner,
 };
 
 // ============================================================
@@ -284,6 +285,27 @@ pub fn set_event_manager(env: &Env, id: u64, manager: &Address) {
     let key = DataKey::EventManager(id);
     env.storage().persistent().set(&key, manager);
     touch_event_persistent(env, &key);
+}
+
+pub fn get_pending_manager(env: &Env, id: u64) -> Option<PendingManager> {
+    let key = DataKey::PendingManager(id);
+    let p: Option<PendingManager> = env.storage().persistent().get(&key);
+    if p.is_some() {
+        touch_event_persistent(env, &key);
+    }
+    p
+}
+
+pub fn set_pending_manager(env: &Env, id: u64, pending: &PendingManager) {
+    let key = DataKey::PendingManager(id);
+    env.storage().persistent().set(&key, pending);
+    touch_event_persistent(env, &key);
+}
+
+pub fn clear_pending_manager(env: &Env, id: u64) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::PendingManager(id));
 }
 
 // ============================================================

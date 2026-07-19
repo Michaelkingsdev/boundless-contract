@@ -13,12 +13,14 @@ use crate::profile_client;
 use crate::storage;
 use crate::token_whitelist;
 use crate::types::{
-    CancellationBranch, CancellationState, CreateEventParams, EventRecord, EventStatus, Pillar,
-    ReleaseKind, Submission, Winner, WinnerSpec,
+    CancellationBranch, CancellationState, CreateEventParams, EventRecord, EventStatus,
+    PendingManager, Pillar, ReleaseKind, Submission, Winner, WinnerSpec,
 };
 
 const MAX_TITLE_LEN: u32 = 120;
 const MAX_WINNERS_PER_SELECT: u32 = 50;
+
+const PENDING_MANAGER_TTL_LEDGERS: u32 = 17_280;
 
 pub const MAX_APPLICANTS_PER_EVENT: u32 = 5_000;
 pub const MAX_CONTRIBUTORS_PER_EVENT: u32 = 5_000;
@@ -130,10 +132,6 @@ pub fn create_event(env: &Env, params: CreateEventParams, op_id: BytesN<32>) -> 
     storage::set_event(env, id, &record);
     storage::set_non_owner_contribution_total(env, id, 0);
 
-    if let Some(manager) = &params.manager {
-        storage::set_event_manager(env, id, manager);
-    }
-
     if is_crowdfunding {
         storage::append_winner(
             env,
@@ -159,21 +157,102 @@ pub fn create_event(env: &Env, params: CreateEventParams, op_id: BytesN<32>) -> 
     }
     .publish(env);
 
+    if let Some(manager) = &params.manager {
+        let expires_at = env
+            .ledger()
+            .sequence()
+            .saturating_add(PENDING_MANAGER_TTL_LEDGERS);
+        let pending = PendingManager {
+            target: manager.clone(),
+            expires_at_ledger: expires_at,
+        };
+        storage::set_pending_manager(env, id, &pending);
+        evt::ManagerProposed {
+            event_id: id,
+            target: manager.clone(),
+            expires_at_ledger: expires_at,
+        }
+        .publish(env);
+    }
+
     idempotency::mark_seen(env, &op_id);
     Ok(id)
 }
 
-pub fn set_manager(env: &Env, event_id: u64, new_manager: Address) -> Result<(), Error> {
+// ============================================================
+// MANAGER ROTATION (two-step propose / accept)
+// ============================================================
+pub fn propose_manager(env: &Env, event_id: u64, new_manager: Address) -> Result<(), Error> {
     admin::require_not_paused(env)?;
     let event = storage::get_event(env, event_id).ok_or(Error::EventNotFound)?;
     resolve_manager(env, event_id, &event.owner).require_auth();
-    storage::set_event_manager(env, event_id, &new_manager);
+
+    let expires_at = env
+        .ledger()
+        .sequence()
+        .saturating_add(PENDING_MANAGER_TTL_LEDGERS);
+    let pending = PendingManager {
+        target: new_manager.clone(),
+        expires_at_ledger: expires_at,
+    };
+    storage::set_pending_manager(env, event_id, &pending);
+
+    evt::ManagerProposed {
+        event_id,
+        target: new_manager,
+        expires_at_ledger: expires_at,
+    }
+    .publish(env);
+    Ok(())
+}
+
+pub fn accept_manager(env: &Env, event_id: u64) -> Result<(), Error> {
+    admin::require_not_paused(env)?;
+    storage::get_event(env, event_id).ok_or(Error::EventNotFound)?;
+
+    let pending =
+        storage::get_pending_manager(env, event_id).ok_or(Error::PendingManagerMismatch)?;
+
+    if env.ledger().sequence() > pending.expires_at_ledger {
+        storage::clear_pending_manager(env, event_id);
+        return Err(Error::PendingManagerMismatch);
+    }
+
+    pending.target.require_auth();
+
+    storage::set_event_manager(env, event_id, &pending.target);
+    storage::clear_pending_manager(env, event_id);
+
+    evt::ManagerChanged {
+        event_id,
+        new_manager: pending.target,
+    }
+    .publish(env);
+    Ok(())
+}
+
+pub fn cancel_pending_manager(env: &Env, event_id: u64) -> Result<(), Error> {
+    admin::require_not_paused(env)?;
+    let event = storage::get_event(env, event_id).ok_or(Error::EventNotFound)?;
+    resolve_manager(env, event_id, &event.owner).require_auth();
+
+    if storage::get_pending_manager(env, event_id).is_none() {
+        return Err(Error::PendingManagerMismatch);
+    }
+    storage::clear_pending_manager(env, event_id);
+
+    evt::PendingManagerCancelled { event_id }.publish(env);
     Ok(())
 }
 
 pub fn get_manager(env: &Env, event_id: u64) -> Result<Address, Error> {
     let event = storage::get_event(env, event_id).ok_or(Error::EventNotFound)?;
     Ok(resolve_manager(env, event_id, &event.owner))
+}
+
+pub fn get_pending_manager(env: &Env, event_id: u64) -> Result<Option<PendingManager>, Error> {
+    storage::get_event(env, event_id).ok_or(Error::EventNotFound)?;
+    Ok(storage::get_pending_manager(env, event_id))
 }
 
 // ============================================================

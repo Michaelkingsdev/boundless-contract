@@ -6,6 +6,7 @@ use soroban_sdk::{
 };
 
 use super::common::drive_cancel;
+use crate::errors::Error;
 use crate::types::{CreateEventParams, EventStatus, Pillar, ReleaseKind, WinnerSpec};
 use crate::{EventsContract, EventsContractClient};
 
@@ -960,52 +961,133 @@ fn create_bounty_with_manager(ctx: &Ctx, manager: &Address) -> u64 {
     ctx.events.create_event(&params, &op_id)
 }
 
-#[test]
-fn manager_defaults_to_owner_and_override_is_recorded() {
-    let ctx = setup();
-
-    let default_id = create_bounty(&ctx);
-    assert_eq!(ctx.events.get_manager(&default_id), ctx.owner);
-
-    let manager = Address::generate(&ctx.env);
-    let managed_id = create_bounty_with_manager(&ctx, &manager);
-    assert_eq!(ctx.events.get_manager(&managed_id), manager);
-    assert_ne!(ctx.events.get_manager(&managed_id), ctx.owner);
-}
-
-#[test]
-fn manager_can_be_rotated() {
-    let ctx = setup();
-    let manager = Address::generate(&ctx.env);
-    let id = create_bounty_with_manager(&ctx, &manager);
-    assert_eq!(ctx.events.get_manager(&id), manager);
-
-    let manager2 = Address::generate(&ctx.env);
-    ctx.events.set_manager(&id, &manager2);
-    assert_eq!(ctx.events.get_manager(&id), manager2);
-}
-
-#[test]
-fn manager_override_can_select_winners() {
-    let ctx = setup();
-    let manager = Address::generate(&ctx.env);
-    let bounty_id = create_bounty_with_manager(&ctx, &manager);
-
-    let op_apply = BytesN::random(&ctx.env);
-    ctx.events
-        .apply_to_bounty(&bounty_id, &ctx.applicant, &op_apply);
-
-    let winners = soroban_sdk::vec![
+fn win_one(ctx: &Ctx) -> soroban_sdk::Vec<WinnerSpec> {
+    soroban_sdk::vec![
         &ctx.env,
         WinnerSpec {
             recipient: ctx.applicant.clone(),
             position: 1,
             reputation_bump: 0,
         },
-    ];
-    let op_select = BytesN::random(&ctx.env);
-    ctx.events.select_winners(&bounty_id, &winners, &op_select);
+    ]
+}
 
-    let event = ctx.events.get_event(&bounty_id);
-    assert_eq!(event.status, EventStatus::Completed);
+#[test]
+fn manager_defaults_to_owner_with_no_pending_proposal() {
+    let ctx = setup();
+    let default_id = create_bounty(&ctx);
+    assert_eq!(ctx.events.get_manager(&default_id), ctx.owner);
+    assert!(ctx.events.get_pending_manager(&default_id).is_none());
+}
+
+#[test]
+fn manager_named_at_creation_is_only_proposed_not_granted() {
+    let ctx = setup();
+    let manager = Address::generate(&ctx.env);
+    let id = create_bounty_with_manager(&ctx, &manager);
+
+    assert_eq!(ctx.events.get_manager(&id), ctx.owner);
+    let pending = ctx.events.get_pending_manager(&id).unwrap();
+    assert_eq!(pending.target, manager);
+}
+
+#[test]
+fn propose_then_accept_transfers_control() {
+    let ctx = setup();
+    let manager = Address::generate(&ctx.env);
+    let id = create_bounty_with_manager(&ctx, &manager);
+
+    ctx.events.accept_manager(&id);
+
+    assert_eq!(ctx.events.get_manager(&id), manager);
+    assert!(ctx.events.get_pending_manager(&id).is_none());
+}
+
+#[test]
+fn unaccepted_proposal_leaves_owner_in_authority() {
+    let ctx = setup();
+    let attacker = Address::generate(&ctx.env);
+    let id = create_bounty_with_manager(&ctx, &attacker);
+
+    ctx.events
+        .apply_to_bounty(&id, &ctx.applicant, &BytesN::random(&ctx.env));
+    ctx.events
+        .select_winners(&id, &win_one(&ctx), &BytesN::random(&ctx.env));
+
+    // select_winners required the owner, not the never-accepted address
+    let auths = ctx.env.auths();
+    assert_eq!(auths[0].0, ctx.owner);
+    assert_ne!(auths[0].0, attacker);
+}
+
+#[test]
+fn accepted_manager_holds_select_winners_authority() {
+    let ctx = setup();
+    let manager = Address::generate(&ctx.env);
+    let id = create_bounty_with_manager(&ctx, &manager);
+    ctx.events.accept_manager(&id);
+
+    ctx.events
+        .apply_to_bounty(&id, &ctx.applicant, &BytesN::random(&ctx.env));
+    ctx.events
+        .select_winners(&id, &win_one(&ctx), &BytesN::random(&ctx.env));
+
+    let auths = ctx.env.auths();
+    assert_eq!(auths[0].0, manager);
+    assert_eq!(ctx.events.get_event(&id).status, EventStatus::Completed);
+}
+
+#[test]
+fn manager_can_be_rotated_via_propose_accept() {
+    let ctx = setup();
+    let manager = Address::generate(&ctx.env);
+    let id = create_bounty_with_manager(&ctx, &manager);
+    ctx.events.accept_manager(&id);
+    assert_eq!(ctx.events.get_manager(&id), manager);
+
+    let manager2 = Address::generate(&ctx.env);
+    ctx.events.propose_manager(&id, &manager2);
+    assert_eq!(ctx.events.get_manager(&id), manager);
+    ctx.events.accept_manager(&id);
+    assert_eq!(ctx.events.get_manager(&id), manager2);
+}
+
+#[test]
+fn cancel_pending_manager_vetoes_a_proposal() {
+    let ctx = setup();
+    let attacker = Address::generate(&ctx.env);
+    let id = create_bounty_with_manager(&ctx, &attacker);
+    assert!(ctx.events.get_pending_manager(&id).is_some());
+
+    ctx.events.cancel_pending_manager(&id);
+    assert!(ctx.events.get_pending_manager(&id).is_none());
+    assert_eq!(ctx.events.get_manager(&id), ctx.owner);
+}
+
+#[test]
+fn accept_with_no_proposal_reverts() {
+    let ctx = setup();
+    let id = create_bounty(&ctx);
+    let res = ctx.events.try_accept_manager(&id);
+    assert_eq!(res, Err(Ok(Error::PendingManagerMismatch)));
+}
+
+#[test]
+fn expired_proposal_cannot_be_accepted() {
+    use soroban_sdk::testutils::Ledger as _;
+
+    let ctx = setup();
+    let manager = Address::generate(&ctx.env);
+    let id = create_bounty_with_manager(&ctx, &manager);
+
+    // advance past the acceptance window (PENDING_MANAGER_TTL_LEDGERS)
+    ctx.env.ledger().with_mut(|li| {
+        li.sequence_number += 20_000;
+    });
+
+    let res = ctx.events.try_accept_manager(&id);
+    assert_eq!(res, Err(Ok(Error::PendingManagerMismatch)));
+    assert_eq!(ctx.events.get_manager(&id), ctx.owner);
+    ctx.events.cancel_pending_manager(&id);
+    assert!(ctx.events.get_pending_manager(&id).is_none());
 }

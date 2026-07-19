@@ -219,12 +219,24 @@ impl EventsContract {
     // ============================================================
     // MANAGEMENT AUTHORITY (manager != funder/owner)
     // ============================================================
-    pub fn set_manager(env: Env, event_id: u64, new_manager: Address) -> Result<(), Error> {
-        event_ops::set_manager(&env, event_id, new_manager)
+    pub fn propose_manager(env: Env, event_id: u64, new_manager: Address) -> Result<(), Error> {
+        event_ops::propose_manager(&env, event_id, new_manager)
+    }
+
+    pub fn accept_manager(env: Env, event_id: u64) -> Result<(), Error> {
+        event_ops::accept_manager(&env, event_id)
+    }
+
+    pub fn cancel_pending_manager(env: Env, event_id: u64) -> Result<(), Error> {
+        event_ops::cancel_pending_manager(&env, event_id)
     }
 
     pub fn get_manager(env: Env, event_id: u64) -> Result<Address, Error> {
         event_ops::get_manager(&env, event_id)
+    }
+
+    pub fn get_pending_manager(env: Env, event_id: u64) -> Result<Option<PendingManager>, Error> {
+        event_ops::get_pending_manager(&env, event_id)
     }
 
     pub fn claim_milestone(

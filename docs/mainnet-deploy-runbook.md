@@ -328,7 +328,7 @@ stellar contract invoke \
 
 Sign `/tmp/events-emergency-pause.xdr` sequentially with two signers, submit with `stellar tx send`, then read `is_paused` back as `true`.
 
-Pause stops event-lifecycle mutations guarded by `require_not_paused`, including `create_event`, `add_funds`, `set_manager`, `start_cancel`, `process_cancel_batch`, `finalize_cancel`, `select_winners`, `claim_milestone`, `apply_to_bounty`, `withdraw_application`, `submit`, and `withdraw_submission`. Reads continue.
+Pause stops event-lifecycle mutations guarded by `require_not_paused`, including `create_event`, `add_funds`, `propose_manager`, `accept_manager`, `cancel_pending_manager`, `start_cancel`, `process_cancel_batch`, `finalize_cancel`, `select_winners`, `claim_milestone`, `apply_to_bounty`, `withdraw_application`, `submit`, and `withdraw_submission`. Reads continue.
 
 Pause intentionally does **not** block admin recovery and governance entrypoints such as `propose_upgrade`, `apply_upgrade`, `cancel_pending_upgrade`, `migrate`, configuration changes, token-list changes, admin rotation, or `unpause`. This is why the 1.1.0 → 1.2.0 upgrade can remain paused through its timelock.
 

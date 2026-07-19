@@ -310,7 +310,8 @@ fn non_manager_cranks_and_finalizes_with_exact_payout_deltas() {
     let ctx = setup();
     let id = create_hackathon(&ctx);
     let manager = Address::generate(&ctx.env);
-    ctx.events.set_manager(&id, &manager);
+    ctx.events.propose_manager(&id, &manager);
+    ctx.events.accept_manager(&id);
     let p1 = Address::generate(&ctx.env);
     let p2 = Address::generate(&ctx.env);
     let p1_amount = 200_0000000_i128;

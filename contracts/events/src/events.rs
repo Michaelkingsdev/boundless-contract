@@ -21,6 +21,24 @@ pub struct EventCancelled {
 }
 
 #[contractevent]
+pub struct ManagerProposed {
+    pub event_id: u64,
+    pub target: Address,
+    pub expires_at_ledger: u32,
+}
+
+#[contractevent]
+pub struct ManagerChanged {
+    pub event_id: u64,
+    pub new_manager: Address,
+}
+
+#[contractevent]
+pub struct PendingManagerCancelled {
+    pub event_id: u64,
+}
+
+#[contractevent]
 pub struct FundsAdded {
     pub event_id: u64,
     pub contributor: Address,

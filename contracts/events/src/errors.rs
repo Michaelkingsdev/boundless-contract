@@ -15,6 +15,7 @@ pub enum Error {
     NotAdmin = 11,
     PendingAdminMismatch = 12,
     PendingAdminExpired = 13,
+    PendingManagerMismatch = 14,
 
     TokenNotSupported = 20,
     FeeAccountMissingTrustline = 21,

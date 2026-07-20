@@ -123,6 +123,10 @@ fn select_winners_pays_recipient_and_bumps_profile() {
     let op_select = BytesN::random(&ctx.env);
     ctx.events.select_winners(&bounty_id, &winners, &op_select);
 
+    // Pull model: winner claims in their own transaction.
+    ctx.events
+        .claim_prize(&bounty_id, &1_u32, &BytesN::random(&ctx.env));
+
     let token = token::Client::new(&ctx.env, &ctx.token_addr);
     assert_eq!(token.balance(&ctx.applicant), TOTAL_BUDGET);
     assert_eq!(token.balance(&ctx.fee_account), FEE_AMOUNT);
@@ -252,6 +256,12 @@ fn select_winners_handles_multi_recipient_distribution() {
     let op_select = BytesN::random(&ctx.env);
     ctx.events.select_winners(&bounty_id, &winners, &op_select);
 
+    // Pull model: each winner claims their own position.
+    ctx.events
+        .claim_prize(&bounty_id, &1_u32, &BytesN::random(&ctx.env));
+    ctx.events
+        .claim_prize(&bounty_id, &2_u32, &BytesN::random(&ctx.env));
+
     let token = token::Client::new(&ctx.env, &ctx.token_addr);
     let amount_a = TOTAL_BUDGET * 60 / 100;
     let amount_b = TOTAL_BUDGET * 40 / 100;
@@ -357,6 +367,10 @@ fn cancel_after_select_winners_refunds_only_remaining() {
     ];
     let op_select = BytesN::random(&ctx.env);
     ctx.events.select_winners(&bounty_id, &winners, &op_select);
+
+    // Pull model: winner claims their 60% before the manager can cancel.
+    ctx.events
+        .claim_prize(&bounty_id, &1_u32, &BytesN::random(&ctx.env));
 
     let token = token::Client::new(&ctx.env, &ctx.token_addr);
     let owner_before = token.balance(&ctx.owner);
@@ -932,6 +946,10 @@ fn select_winners_pays_against_remaining_escrow_including_top_ups() {
     let op_select = BytesN::random(&ctx.env);
     ctx.events.select_winners(&bounty_id, &winners, &op_select);
 
+    // Pull model: claim; the pre-selection top-up is in the baseline.
+    ctx.events
+        .claim_prize(&bounty_id, &1_u32, &BytesN::random(&ctx.env));
+
     let token = token::Client::new(&ctx.env, &ctx.token_addr);
     assert_eq!(token.balance(&ctx.applicant), TOTAL_BUDGET + top_up);
 
@@ -1032,8 +1050,14 @@ fn accepted_manager_holds_select_winners_authority() {
     ctx.events
         .select_winners(&id, &win_one(&ctx), &BytesN::random(&ctx.env));
 
+    // select_winners is the manager-gated step, so it must carry the
+    // accepted manager's auth.
     let auths = ctx.env.auths();
     assert_eq!(auths[0].0, manager);
+
+    // Pull model: the winner claims to drain escrow and complete the event.
+    ctx.events
+        .claim_prize(&id, &1_u32, &BytesN::random(&ctx.env));
     assert_eq!(ctx.events.get_event(&id).status, EventStatus::Completed);
 }
 
@@ -1069,7 +1093,7 @@ fn accept_with_no_proposal_reverts() {
     let ctx = setup();
     let id = create_bounty(&ctx);
     let res = ctx.events.try_accept_manager(&id);
-    assert_eq!(res, Err(Ok(Error::PendingManagerMismatch)));
+    assert_eq!(res, Err(Ok(Error::PendingRotationMismatch)));
 }
 
 #[test]
@@ -1086,7 +1110,7 @@ fn expired_proposal_cannot_be_accepted() {
     });
 
     let res = ctx.events.try_accept_manager(&id);
-    assert_eq!(res, Err(Ok(Error::PendingManagerMismatch)));
+    assert_eq!(res, Err(Ok(Error::PendingRotationExpired)));
     assert_eq!(ctx.events.get_manager(&id), ctx.owner);
     ctx.events.cancel_pending_manager(&id);
     assert!(ctx.events.get_pending_manager(&id).is_none());

@@ -13,7 +13,7 @@ The Stellar Development Foundation publishes a Claude Code skill that bundles cu
 
 After install, the seven sub-skills (`soroban`, `dapp`, `assets`, `data`, `agentic-payments`, `zk-proofs`, `standards`) become available across sessions. Lean on `soroban/` for contract changes and audit prep; lean on `dapp/` and `assets/` only when the work crosses into the frontend wallet or trustline flows.
 
-Source: https://github.com/stellar/stellar-dev-skill
+Source: <https://github.com/stellar/stellar-dev-skill>
 
 ## Hard rules
 
@@ -22,6 +22,7 @@ Source: https://github.com/stellar/stellar-dev-skill
 - **Per-event configuration over global constants.** Anything sales might want to vary per program (fees, windows, caps) belongs on `EventRecord` or its variant payload, not in module constants.
 - **Tests cover the math.** Every payout split (single + multi-position + sweep) has a test that asserts both the recipient and the fee account deltas.
 - **Snapshots are inspection tooling, not history.** `test_snapshots/` is gitignored: snapshots are derived artifacts that `cargo test` regenerates from any commit, and committing them made PR diffs so large that the security scanners skipped them. When reviewing a storage-layout or auth change, regenerate locally and inspect the snapshot diff — but never commit snapshot files.
+- **Comment sparingly.** A comment earns its place only by stating a constraint the code cannot: an invariant, a security ordering, a compatibility trap, a non-obvious "why". Do not narrate what the code does, restate the function name, tag changes with version/PR numbers, or leave banners over self-evident blocks. When in doubt, delete it — dense explanatory comments read as AI-generated and make review harder, not easier. Match the density of the surrounding file.
 
 ## Build, test, deploy
 
@@ -49,3 +50,6 @@ cargo build --release --target wasm32-unknown-unknown
 ```
 
 Update `BACKLOG.md` if your PR closes one of the entries there.
+
+@AGENTS.md
+Never add "Co-Authored-By" lines to commits

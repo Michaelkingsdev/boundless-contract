@@ -196,8 +196,25 @@ pub enum DataKey {
     // Appended in 1.2.0 to preserve existing key discriminants.
     NonOwnerContributionTotal(u64),
 
+    // Appended in 1.3.0 to preserve existing key discriminants.
+    EventPrizeAward(u64, u32),
+    EventUnclaimedPrizes(u64),
+    EventPrizeBaseEscrow(u64),
+    EventPrizeClaimExpiry(u64),
+
     // Appended for two-step manager rotation to preserve key discriminants.
     PendingManager(u64),
+}
+
+// ============================================================
+// PRIZE AWARD payload (keyed by (event, position); pull-model claims)
+// ============================================================
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrizeAward {
+    pub recipient: Address,
+    pub anchor_idx: u32,
+    pub reputation_bump: u32,
 }
 
 // ============================================================
